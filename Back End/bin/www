@@ -1,0 +1,363 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+const fs = require("fs");
+var app = require("../app");
+var debug = require("debug")("api:server");
+var http = require("http");
+const { Server } = require("socket.io");
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || "3000");
+app.set("port", port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(
+  // {
+  // 	key: fs.readFileSync('/etc/letsencrypt/live/api.gymrat.app/privkey.pem'),
+  // 	cert: fs.readFileSync('/etc/letsencrypt/live/api.gymrat.app/fullchain.pem'),
+  // 	ca: fs.readFileSync('/etc/letsencrypt/live/api.gymrat.app/fullchain.pem'),
+  // },
+  app
+);
+
+/**
+ * Create Socket server.
+ */
+
+const io = new Server(server, {
+  /* options */
+});
+
+/**
+ * Socket server methods
+ */
+
+let onlineUsers = [];
+
+const activeRooms = io.of("/").adapter.rooms;
+const socketIds = io.of("/").adapter.sids;
+
+const addNewUser = (userId, socketId) => {
+  if (userId !== null && !Number.isFinite(userId)) {
+    !onlineUsers.some((user) => user.userId === userId) &&
+      onlineUsers.push({ userId, socketId });
+  }
+  console.log(`Active Users: `, onlineUsers);
+};
+
+const removeUser = (socketId) => {
+  onlineUsers = onlineUsers.filter((user) => user.socketId !== socketId);
+};
+
+const getUser = (userId) => {
+  let user_found = onlineUsers.find((user) => user.userId === userId);
+  console.log(`User Found: `, user_found);
+  return user_found;
+};
+
+const getAllUsers = (userArr) => {
+  let allUsers = [];
+  userArr.forEach((userId) => {
+    let user_found = onlineUsers.find(
+      (user) => user.userId === userId.toString()
+    );
+    allUsers.push(user_found);
+  });
+  console.log(`Users In Group: `, allUsers);
+  return allUsers;
+};
+
+/**
+ * Socket server io connection
+ */
+
+io.on("connection", (socket) => {
+  socket.on("newUser", (userId) => {
+    console.log(`User #${userId} online`);
+    addNewUser(userId, socket.id);
+  });
+
+  // friend request sent
+  socket.on("sendRequest", ({ senderId, receiverId, type }) => {
+    console.log(
+      `\nUser #${senderId} sent a request to user #${receiverId.toString()}`
+    );
+    // both should update
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("getRequest", {
+        receiverId,
+        type,
+      });
+    }
+    const receiver = getUser(receiverId.toString());
+    if (receiver != undefined) {
+      io.to(receiver.socketId).emit("getRequest", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+  // remove friend
+  socket.on("removeFriend", ({ senderId, receiverId, type }) => {
+    console.log(
+      `\nUser #${senderId} removed user #${receiverId.toString()} as friend`
+    );
+
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("getRemoval", {
+        receiverId,
+        type,
+      });
+    }
+
+    const receiver = getUser(receiverId.toString());
+    if (receiver != undefined) {
+      io.to(receiver.socketId).emit("getRemoval", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+  socket.on("approvedFriend", ({ senderId, receiverId, type }) => {
+    console.log(
+      `\nUser #${senderId} added user #${receiverId.toString()} as friend`
+    );
+
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("updateFriend", {
+        receiverId,
+        type,
+      });
+    }
+
+    const receiver = getUser(receiverId.toString());
+    if (receiver != undefined) {
+      io.to(receiver.socketId).emit("updateFriend", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+  // friend request rejected - one side
+  socket.on("rejectRequest", ({ senderId, receiverId, type }) => {
+    console.log(
+      `\nUser #${senderId} rejected user #${receiverId.toString()} as friend`
+    );
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("updateRequests", {
+        receiverId,
+        type,
+      });
+    }
+    const receiver = getUser(receiverId.toString());
+    if (receiver != undefined) {
+      io.to(receiver.socketId).emit("updateRequests", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+  socket.on("cancelRequest", ({ senderId, receiverId, type }) => {
+    console.log(
+      `\nUser #${senderId} cancelled request to user #${receiverId.toString()}`
+    );
+
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("removeCancelled", {
+        receiverId,
+        type,
+      });
+    }
+
+    const receiver = getUser(receiverId.toString());
+    if (receiver != undefined) {
+      io.to(receiver.socketId).emit("removeCancelled", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+  socket.on("createChat", ({ senderId, receiverIds, groupId, type }) => {
+    console.log(
+      `\nUser #${senderId} created chat ${groupId} with users: ${receiverIds}`
+    );
+    const sender = getUser(senderId.toString());
+    const groupUsers = getAllUsers(receiverIds);
+    socket.join(`chat #${groupId}`);
+
+    groupUsers.forEach((user) => {
+      if (user != undefined) {
+        io.to(user.socketId).emit("addedChat", {
+          senderId,
+          receiverIds,
+          groupId,
+          type,
+        });
+      }
+    });
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("addedChat", {
+        senderId,
+        receiverIds,
+        groupId,
+        type,
+      });
+    }
+  });
+
+  socket.on("joinAll", (groups) => {
+    socket.join(groups);
+    console.log(`\nRooms user is in: ${groups} \nActive Rooms: `, activeRooms);
+  });
+
+  socket.on("addMessage", ({ senderId, groupId, body, type }) => {
+    console.log(
+      `\nUser #${senderId} sent new message of ${body} to chat ${groupId}`
+    );
+    io.to(groupId).emit("newMessage", {
+      senderId,
+      groupId,
+      body,
+      type,
+    });
+  });
+
+  socket.on("leaveChat", ({ senderId, groupId, body, type }) => {
+    const userLeaving = getUser(senderId.toString());
+
+    const socketsInChat = new Set(activeRooms.get(groupId));
+
+    activeRooms.get(groupId).delete(userLeaving.socketId);
+
+    socketsInChat.forEach((socketId) => {
+      io.to(socketId).emit("leftChat", {
+        senderId,
+        groupId,
+        body,
+        type,
+      });
+    });
+  });
+
+  socket.on("updateProfile", ({ senderId, type }) => {
+    console.log(`\nUser #${senderId} edited their profile`);
+    const sender = getUser(senderId.toString());
+    if (sender != undefined) {
+      io.to(sender.socketId).emit("profileEdited", {
+        senderId,
+        type,
+      });
+    }
+  });
+
+
+  /// socket additions for batches
+  /*
+  createBatch
+  createEvent
+  updateBatch
+  updateEvent
+
+  addmessage (batch)
+  addmessage (event)
+
+  leaveEvent
+  leaveBatch
+
+  joinEvent
+  joinBatch
+
+  rsvpEvent
+  notRsvpEvent
+
+  joinAllEvents
+  joinAllBatches
+  */
+  socket.on("disconnect", () => {
+    removeUser(socket.id);
+    console.log("a user disconnected!");
+  });
+});
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on("error", onError);
+server.on("listening", onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== "listen") {
+    throw error;
+  }
+
+  var bind = typeof port === "string" ? "Pipe " + port : "Port " + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case "EACCES":
+      console.error(bind + " requires elevated privileges");
+      process.exit(1);
+      break;
+    case "EADDRINUSE":
+      console.error(bind + " is already in use");
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === "string" ? "pipe " + addr : "port " + addr.port;
+  debug("Listening on " + bind);
+}

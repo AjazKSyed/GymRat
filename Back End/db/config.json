@@ -1,0 +1,9 @@
+{
+  "development": {
+    "username": "gymrat",
+    "password": "gorams",
+    "database": "gymrat",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  }
+}
