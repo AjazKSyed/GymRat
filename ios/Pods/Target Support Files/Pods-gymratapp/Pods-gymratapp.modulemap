@@ -1,0 +1,6 @@
+module Pods_gymratapp {
+  umbrella header "Pods-gymratapp-umbrella.h"
+
+  export *
+  module * { export * }
+}

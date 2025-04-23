@@ -1,0 +1,1 @@
+../../../../../../node_modules/react-native/React/FBReactNativeSpec/Release/gymrat-app/node_modules/react-native/React/FBReactNativeSpec/FBReactNativeSpec/FBReactNativeSpec.h

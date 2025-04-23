@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "gymrat-app",
+    "slug": "gymrat-app",
+    "version": "1.0.0",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.gymrat.package"
+    },
+    "ios": {
+      "bundleIdentifier": "com.gymrat.package"
+    }
+  },
+  "name": "gymrat-app"
+}
